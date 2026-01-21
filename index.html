@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luxury Tic-Tac-Toe Pro</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body { background-color: #0d0d0d; color: #d4af37; font-family: 'Segoe UI', sans-serif; text-align: center; margin: 0; }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .hidden { display: none !important; }
+        .menu-content { background: #1a1a1a; padding: 25px; border-radius: 15px; border: 1px solid #d4af37; width: 85%; max-width: 400px; }
+        input, select { width: 90%; padding: 12px; margin: 10px 0; background: #000; border: 1px solid #d4af37; color: gold; border-radius: 5px; text-align: center; }
+        .menu-btn, .start-btn, .back-btn { background: linear-gradient(45deg, #d4af37, #f9f295); color: #000; border: none; padding: 12px; width: 100%; font-weight: bold; margin-top: 10px; border-radius: 5px; cursor: pointer; }
+        .back-btn { background: #333; color: #d4af37; border: 1px solid #d4af37; }
+        #scoreboard { display: flex; justify-content: space-around; background: #1a1a1a; padding: 15px; border-bottom: 2px solid #d4af37; }
+        .board { display: grid; grid-template-columns: repeat(3, 90px); gap: 15px; justify-content: center; margin: 20px auto; }
+        .cell { width: 90px; height: 90px; background: #1a1a1a; border: 1px solid #d4af37; font-size: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; }
+        #voice-status { font-size: 12px; color: #00ff00; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <div id="main-menu" class="overlay">
+        <div class="menu-content">
+            <h2 style="letter-spacing: 3px;">LUXURY TTT</h2>
+            <input type="text" id="userName" placeholder="Apna Naam Likhein" value="Player">
+
+            <div id="initial-modes">
+                <button class="menu-btn" onclick="showConfig('ai')">PLAY WITH COMPUTER</button>
+                <button class="menu-btn" onclick="showConfig('online')">PLAY WITH FRIEND</button>
+            </div>
+
+            <div id="ai-config" class="hidden">
+                <h3>DIFFICULTY</h3>
+                <select id="difficulty">
+                    <option value="easy">Easy</option>
+                    <option value="hard">Unbeatable</option>
+                </select>
+                <button class="start-btn" onclick="startAIGame()">START GAME</button>
+                <button class="back-btn" onclick="goBack()">BACK</button>
+            </div>
+
+            <div id="online-config" class="hidden">
+                <p>Koi bhi 4-digit code likhein:</p>
+                <input type="number" id="roomID" placeholder="Example: 5566">
+                <button class="start-btn" id="joinBtn" onclick="joinNetworkGame()">JOIN GAME</button>
+                <button class="back-btn" onclick="goBack()">BACK</button>
+                <p id="status-msg" style="font-size: 12px; color: #fff; margin-top: 10px;"></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-screen" class="hidden">
+        <div id="scoreboard">
+            <div>ME: <span id="score-me">0</span></div>
+            <div>TIE: <span id="score-tie">0</span></div>
+            <div>OPP: <span id="score-opp">0</span></div>
+        </div>
+        <div id="turn-display" style="margin:15px; font-size:20px;">WAITING...</div>
+        <div id="voice-status"></div>
+        <div class="board" id="board">
+            <div class="cell" onclick="handleInteraction(0)"></div>
+            <div class="cell" onclick="handleInteraction(1)"></div>
+            <div class="cell" onclick="handleInteraction(2)"></div>
+            <div class="cell" onclick="handleInteraction(3)"></div>
+            <div class="cell" onclick="handleInteraction(4)"></div>
+            <div class="cell" onclick="handleInteraction(5)"></div>
+            <div class="cell" onclick="handleInteraction(6)"></div>
+            <div class="cell" onclick="handleInteraction(7)"></div>
+            <div class="cell" onclick="handleInteraction(8)"></div>
+        </div>
+        <h2 id="winner-msg" style="color: #fff;"></h2>
+        <button class="back-btn" onclick="location.reload()">MAIN MENU</button>
+    </div>
+
+    <script>
+        let peer, conn, localStream;
+        let gameMode = '', myName = '', oppName = 'CPU', myTurn = false, mySymbol = 'X';
+        let board = ["", "", "", "", "", "", "", "", ""];
+        let scores = {mine: 0, opp: 0, tie: 0};
+
+        // STUN Servers for Cross-Network Play
+        const peerConfig = {
+            config: { 'iceServers': [
+                { 'urls': 'stun:stun.l.google.com:19302' },
+                { 'urls': 'stun:stun1.l.google.com:19302' },
+                { 'urls': 'stun:stun2.l.google.com:19302' },
+                { 'urls': 'stun:stun.services.mozilla.com' }
+            ]}
+        };
+
+        function showConfig(type) {
+            document.getElementById('initial-modes').classList.add('hidden');
+            document.getElementById(type + '-config').classList.remove('hidden');
+        }
+
+        function goBack() {
+            document.getElementById('initial-modes').classList.remove('hidden');
+            document.getElementById('ai-config').classList.add('hidden');
+            document.getElementById('online-config').classList.add('hidden');
+        }
+
+        async function startVoice() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                document.getElementById('voice-status').innerText = "🎙️ Voice Active";
+            } catch (e) { console.log("Mic error"); }
+        }
+
+        function joinNetworkGame() {
+            let rID = document.getElementById('roomID').value;
+            if (rID.length < 4) return alert("Kam az kam 4-digit code likhein!");
+
+            document.getElementById('status-msg').innerText = "Connecting...";
+            startVoice();
+            myName = document.getElementById('userName').value;
+
+            // Pehle check karte hain ke kya ye code as a host available hai
+            peer = new Peer("ttt-" + rID, peerConfig);
+
+            peer.on('open', (id) => {
+                document.getElementById('status-msg').innerText = "Room Created! Tell friend to join with " + rID;
+                mySymbol = 'X'; myTurn = true;
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'id-taken') {
+                    // Agar code pehle se kisi ne liya hai, toh hum joiner ban jayenge
+                    peer.destroy();
+                    joinAsGuest(rID);
+                }
+            });
+
+            peer.on('connection', (c) => {
+                conn = c; setupOnlineHandlers();
+            });
+
+            peer.on('call', (call) => {
+                call.answer(localStream);
+                call.on('stream', s => { let a = new Audio(); a.srcObject = s; a.play(); });
+            });
+        }
+
+        function joinAsGuest(rID) {
+            peer = new Peer(null, peerConfig);
+            peer.on('open', () => {
+                conn = peer.connect("ttt-" + rID);
+                mySymbol = 'O'; myTurn = false;
+                setupOnlineHandlers();
+            });
+        }
+
+        function setupOnlineHandlers() {
+            document.getElementById('main-menu').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+
+            conn.on('open', () => {
+                conn.send({type: 'intro', name: myName});
+                if(mySymbol === 'O') peer.call(conn.peer, localStream);
+            });
+
+            conn.on('data', data => {
+                if (data.type === 'intro') { oppName = data.name; updateTurnText(); }
+                if (data.type === 'move') { applyMove(data.index, (mySymbol==='X'?'O':'X')); myTurn = true; updateTurnText(); }
+            });
+        }
+
+        function startAIGame() {
+            gameMode = 'ai';
+            myName = document.getElementById('userName').value;
+            document.getElementById('main-menu').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            myTurn = true; updateTurnText();
+        }
+
+        function handleInteraction(i) {
+            if (board[i] !== "" || !myTurn) return;
+            applyMove(i, mySymbol);
+            if (conn) {
+                conn.send({type: 'move', index: i});
+                myTurn = false; updateTurnText();
+            } else {
+                myTurn = false; updateTurnText();
+                setTimeout(cpuAction, 600);
+            }
+        }
+
+        function applyMove(i, s) {
+            board[i] = s;
+            document.getElementsByClassName('cell')[i].innerText = s;
+            checkWinner();
+        }
+
+        function checkWinner() {
+            const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+            let win = wins.find(p => board[p[0]] && board[p[0]]===board[p[1]] && board[p[0]]===board[p[2]]);
+
+            if (win || !board.includes("")) {
+                let msg = win ? (board[win[0]]===mySymbol ? "YOU WON!" : oppName+" WON!") : "TIE!";
+                if(win) board[win[0]]===mySymbol ? scores.mine++ : scores.opp++; else scores.tie++;
+                document.getElementById('winner-msg').innerText = msg;
+                document.getElementById('score-me').innerText = scores.mine;
+                document.getElementById('score-opp').innerText = scores.opp;
+                document.getElementById('score-tie').innerText = scores.tie;
+                myTurn = false;
+                setTimeout(resetBoard, 2500);
+            }
+        }
+
+        function resetBoard() {
+            board = board.fill("");
+            Array.from(document.getElementsByClassName('cell')).forEach(c => c.innerText = "");
+            document.getElementById('winner-msg').innerText = "";
+            myTurn = (mySymbol === 'X'); updateTurnText();
+        }
+
+        function updateTurnText() {
+            let d = document.getElementById('turn-display');
+            d.innerText = myTurn ? "YOUR TURN" : oppName + "'S TURN";
+            d.style.color = myTurn ? "#d4af37" : "#fff";
+        }
+
+        function cpuAction() {
+            let avail = board.map((v, i) => v === "" ? i : null).filter(v => v !== null);
+            if(avail.length > 0) {
+                let move = avail[Math.floor(Math.random() * avail.length)];
+                applyMove(move, 'O'); myTurn = true; updateTurnText();
+            }
+        }
+    </script>
+</body>
+</html>
